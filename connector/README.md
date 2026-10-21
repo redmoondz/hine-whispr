@@ -83,18 +83,64 @@ All failures use `{ "ok": false, "error": "..." }`.
 
 A manual command invokes the configured agent and may incur provider charges.
 
+## OpenWhispr Desktop chat completions
+
+For self-hosted dictation-agent / reasoning / voice-assistant mode in OpenWhispr
+Desktop, use `http://127.0.0.1:3210` as the Connector base URL (adjust the port
+if configured). Desktop adds `/v1` automatically; a base URL ending in `/v1`
+also works. Set Desktop's API key to the value of `CONNECTOR_API_TOKEN`.
+
+`POST /v1/chat/completions` and its alias `POST /chat/completions` use the same
+bearer authentication, 64 KiB body limit, and error responses as `/command`.
+Send JSON with `messages` containing a nonempty string in the final `user`
+message. Only that message is forwarded to the existing Hina agent; system
+messages, earlier conversation history, `model`, and sampling options are ignored.
+A missing, empty, or non-string final user message returns 400.
+
+With `stream` absent or `false`, the response is:
+
+```json
+{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}
+```
+
+Token usage is omitted because the existing CLI wrapper returns only reply text.
+With `stream: true`, the response has `Content-Type: text/event-stream` and sends
+the CLI's final reply as one content delta followed immediately by `[DONE]`:
+
+```text
+data: {"choices":[{"delta":{"content":"OK"}}]}
+
+data: [DONE]
+
+```
+
+Streaming waits for the final agent reply; it adds no artificial token delays.
+Agent failures return the existing JSON error before any SSE headers are sent.
+To check both modes manually, run this request with `stream` set to `false`, then
+repeat with `true`:
+
+```bash
+curl --fail-with-body --no-buffer \
+  "http://127.0.0.1:${CONNECTOR_PORT:-3210}/v1/chat/completions" \
+  -H "Authorization: Bearer ${CONNECTOR_API_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Reply with exactly OK"}],"stream":false}'
+```
+
 ## Verification in the implementation environment
 
-- TypeScript 5.9.3 compilation passed with the locally available compiler and
-  Node type declarations.
-- `npm test` was attempted but could not start: `vitest: not found`.
-- Dependency installation is blocked: DNS resolution for `registry.npmjs.org`
-  is unavailable in the restricted environment.
+- `npm run build` passes with the locally installed TypeScript compiler.
+- Vitest is available. The 29 in-memory chat-completions contract tests and
+  12 agent-client tests pass with
+  `npm test -- test/chatCompletions.test.ts test/agentClient.test.ts`.
+- Full `npm test` cannot pass in this sandbox: the existing server integration
+  tests require loopback listeners and fail with `listen EPERM`. These tests
+  still need to run in an environment that allows socket binding.
 - Manual HTTP/Gateway verification remains pending: binding a loopback socket
   fails with `EPERM` in the execution sandbox. The curl responses above are
   expected results, not a claim of a completed live agent turn.
 - A detached standalone invocation of the exact OpenClaw command was attempted
   without the exec marker. It exited with status 1 and returned no valid reply.
 
-Run `npm install`, `npm test`, `npm run build`, then the curl checks in an
+Run `npm test`, `npm run build`, then the curl checks in an
 unrestricted standalone WSL2 shell to complete acceptance verification.
