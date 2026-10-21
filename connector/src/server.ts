@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { AgentError, runAgent } from './agentClient.ts';
 import { loadConfig } from './config.ts';
 import type { Config } from './config.ts';
+import { isObject, SettingsStore } from './settingsStore.ts';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -30,13 +31,16 @@ function lastUserText(messages: unknown): string | undefined {
 }
 
 export function createConnectorServer(config: Config, agent: (text: string) => Promise<string> = text => runAgent(text, config)) {
+  const settings = new SettingsStore();
   const server = createServer(async (request, response) => {
     if (request.url === '/health' && request.method === 'GET') {
       json(response, 200, { ok: true, agent: 'hina' });
       return;
     }
     const chatCompletion = request.url === '/v1/chat/completions' || request.url === '/chat/completions';
-    if (request.url !== '/command' && !chatCompletion) {
+    const settingsRoute = request.url === '/settings';
+    const appliedRoute = request.url === '/settings/applied';
+    if (request.url !== '/command' && !chatCompletion && !settingsRoute && !appliedRoute) {
       json(response, 404, { ok: false, error: 'Not found' });
       return;
     }
@@ -44,9 +48,14 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
       json(response, 401, { ok: false, error: 'Unauthorized' });
       return;
     }
-    if (request.method !== 'POST') {
-      response.setHeader('allow', 'POST');
+    const allowedMethods = settingsRoute ? ['GET', 'PUT'] : ['POST'];
+    if (!allowedMethods.includes(request.method ?? '')) {
+      response.setHeader('allow', allowedMethods.join(', '));
       json(response, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    if (settingsRoute && request.method === 'GET') {
+      json(response, 200, settings.get());
       return;
     }
     let text: string;
@@ -64,6 +73,19 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
         chunks.push(chunk);
       }
       const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (settingsRoute) {
+        if (!isObject(body) || typeof body.baseRevision !== 'number' || !isObject(body.settings)) {
+          throw new Error();
+        }
+        const result = settings.put(body.baseRevision, body.settings);
+        json(response, result.status, result.body);
+        return;
+      }
+      if (appliedRoute) {
+        const result = settings.applied(isObject(body) ? body.revision : undefined);
+        json(response, result.status, result.body);
+        return;
+      }
       if (!body || typeof body !== 'object') throw new Error();
       const input = chatCompletion
         ? lastUserText('messages' in body ? body.messages : undefined)
@@ -74,6 +96,10 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
       text = input;
       stream = chatCompletion && 'stream' in body && body.stream === true;
     } catch {
+      if (settingsRoute || appliedRoute) {
+        json(response, 400, { ok: false, error: 'INVALID' });
+        return;
+      }
       json(response, 400, { ok: false, error: chatCompletion
         ? 'Expected JSON messages with a nonempty final user content string'
         : 'Expected JSON with a nonempty text string' });
