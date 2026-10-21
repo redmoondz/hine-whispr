@@ -63,6 +63,7 @@
    - `POST /tools/invoke` (`tools-invoke-http-api.md`) — вызов одного инструмента; **полное operator-право (опасно), держать только на loopback**.
    - OpenAI-compatible `/v1/*` и OpenResponses `/v1/responses*` — поверхности совместимости.
 7. **CLI agent turn**: `openclaw agent --agent hina -m "..." --json` — запускает turn существующего агента через Gateway (сохраняет его тулзы/контекст/разрешения). Также `openclaw agent exec` (изолированный embedded turn).
+   ⚠️ **Проверено на живой установке**: CLI отклоняет вызов из контекста агентного exec («lost inter-session attribution»). Значит Connector должен быть **отдельным процессом** (свой запуск, не через exec-маркер агента) — либо использовать Gateway WS напрямую.
 
 ### 2.4 Windows ↔ WSL2
 
@@ -103,7 +104,7 @@ Hotkey → capture → STT(локально) → Connector → openclaw agent --
 
 - **Desktop = форк OpenWhispr**, а не с нуля: берём готовые hotkey/audio/STT/TTS/UI/store. Правки — в отдельной ветке `hina-desktop` от upstream, с rebase-совместимостью.
 - **Connector = отдельный backend-процесс** (не внутри Electron, не внутри Gateway): единая точка аутентификации, настроечного контракта и вызова агента. Делаем на Node (близко к стеку OpenWhispr) или FastAPI (близко к whisper-экосистеме). Решение — зафиксировать до начала Stage 2; MVP стартует с Node, чтобы reuse типов/контрактов OpenWhispr.
-- **Вызов агента — официальный CLI `openclaw agent`**, а не прямой OpenRouter и не /tools/invoke (последний слишком широк). Потоковость: MVP — `--json` (полный текст-ответ); стриминг добавить через Gateway WS protocol/сессию на Stage 2+/3.
+- **Вызов агента — официальный интерфейс, НЕ прямой OpenRouter и НЕ /tools/invoke.** Два пути: (а) CLI `openclaw agent --agent hina … --json` из **отдельного процесса** Connector (проверено: из agent-exec CLI отклоняется по атрибуции); (б) Gateway WS protocol (`chat.send` / `sessions.send`, role operator, bearer auth из env `OPENCLAW_GATEWAY_TOKEN`) — каноничный путь с поддержкой стриминга. **Решение: Connector = WS-клиент Gateway (streaming-capable, атрибуционно-корректный); CLI — fallback для быстрых проверок.**
 - **Dashboard — сначала feature plugin (нативная страница)**. Если Custom plugin UI не подходит/выключен, fallback: portal (независимый origin, интеграция через Gateway WS). Ограничение документировать явно.
 - **Единый контракт настроек** с версионированием (`schemaVersion` + `revision`), last-write-wins с явным ack «applied vs saved», защита от циклов синхронизации (игнор собственных echo, сравнение по ревизии).
 - **Аутентификация локальных API** — token-борт на Connector; секреты только через env/OpenClaw secrets, не в git.
@@ -112,7 +113,7 @@ Hotkey → capture → STT(локально) → Connector → openclaw agent --
 
 1. ✅ **Windows↔WSL2**: `mirrored` НЕ включён (`/etc/wsl.conf` — только `systemd`, `.wslconfig` — memory/autoMemoryReclaim). Значит Windows→WSL2 нет гарантированного `localhost`-проброса ⇒ Dashboard/Desktop обращаются к Connector через WSL2 IP или `netsh portproxy`, либо включаем mirrored networking. **Решено: MVP — Connector слушает `0.0.0.0`, Desktop задаёт адрес в настройках.**
 2. ✅ **CUDA**: `ctranslate2` и `torch` в Python НЕ установлены. Путь Desktop — нативные `whisper.cpp`/`sherpa-onnx` на GPU Windows-стороны; Python-стек не используется для STT/TTS. `nvidia-smi` segfault — пред-existing проблема WSL-драйвера, **не** влияет на Windows-native GPU. Честный статус GPU в Dashboard — только из Windows-стороны (позже).
-3. ⏳ **Streaming**: CLI `openclaw agent` даёт финальный JSON; стриминговый канал через Gateway WS — подтвердить метод на живой сессии (Stage 2+).
+3. ✅ **Streaming**: целевой путь — Gateway WS (`chat.send`/`sessions.send`, есть стриминг). CLI `openclaw agent` даёт только финальный JSON. Контракт WS-стрима подтвердить при реализации Connector (Stage 3).
 4. ⏳ **Аудио-девайсы/хоткеи Windows**: в upstream есть `winkeys`, `windows-mic-listener`, `windows-system-audio-helper` — проверить сборку/работу при форке (Stage 2).
 5. ✅ **Dashboard-монтирование**: `gateway.controlUi` / Custom plugin UI — ключ unset ⇒ runtime default **выключен**. Нативная страница требует включения Labs. **Решено: MVP Dashboard — portal (независимый origin, интеграция через Gateway WS), документируем ограничение; нативную страницу — опционально после включения Labs.**
 
