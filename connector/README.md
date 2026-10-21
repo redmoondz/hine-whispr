@@ -1,0 +1,100 @@
+# Hina Connector
+
+A standalone Node.js process connecting a loopback HTTP API to the existing
+OpenClaw agent `hina`. Runtime uses Node built-ins only. TypeScript and Vitest
+are development dependencies. Use Node 22.18+ or Node 24+.
+
+## Install and run
+
+```bash
+cd connector
+npm install
+npm test
+npm run build
+# Set CONNECTOR_API_TOKEN securely in this shell or a private environment file.
+# OPENCLAW_GATEWAY_TOKEN is inherited when your Gateway requires it.
+npm start
+```
+
+Run from a normal standalone shell, a systemd user service, or `nohup`.
+OpenClaw sets `OPENCLAW_SHELL=exec` inside an agent's execution context; agent
+turns launched from that context fail with "lost inter-session attribution".
+Connector refuses startup with that marker. To intentionally launch a standalone
+background process from that context, with credentials already in the environment:
+
+```bash
+umask 077
+nohup env -u OPENCLAW_SHELL node dist/server.js > connector.log 2>&1 &
+```
+
+The standalone process invokes exactly:
+
+```text
+openclaw agent --agent hina --message-file <private temporary file> --json
+```
+
+It creates no agent and uses neither OpenRouter directly nor `/tools/invoke`.
+Input is written as UTF-8 to a mode-0600 file in a private temporary directory,
+then deleted after completion or failure. Environment, including Gateway
+credentials, is inherited at runtime. There is no shell interpolation of input.
+Do not commit environment files, credentials, or private CLI output.
+
+## Environment
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CONNECTOR_API_TOKEN` | Required | Nonempty bearer token without whitespace |
+| `CONNECTOR_PORT` | `3210` | Integer port, 1–65535 |
+| `CONNECTOR_TIMEOUT_MS` | `120000` | CLI timeout in milliseconds, 1–2147483647 |
+| `OPENCLAW_BIN` | `openclaw` on `PATH` | Optional executable path |
+| `OPENCLAW_GATEWAY_TOKEN` | Inherited if set | Gateway credential used by OpenClaw |
+| `TMPDIR` | OS default | Optional base directory for private message files |
+
+Connector always binds `127.0.0.1`, following `SPEC.md`; older architecture notes
+mentioning `0.0.0.0` do not apply to this milestone. It never logs tokens, commands,
+CLI stdout, or stderr. `npm run dev` uses Node's built-in TypeScript stripping;
+`npm run build` compiles to `dist/`; `npm start` runs the compiled server.
+
+## Manual acceptance checks
+
+In a second normal shell with the same `CONNECTOR_API_TOKEN` set:
+
+```bash
+curl --fail-with-body "http://127.0.0.1:${CONNECTOR_PORT:-3210}/health"
+# {"ok":true,"agent":"hina"}
+
+curl -i -X POST "http://127.0.0.1:${CONNECTOR_PORT:-3210}/command" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Reply with exactly OK"}'
+# HTTP 401; {"ok":false,"error":"Unauthorized"}
+
+curl --fail-with-body "http://127.0.0.1:${CONNECTOR_PORT:-3210}/command" \
+  -H "Authorization: Bearer ${CONNECTOR_API_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Reply with exactly OK"}'
+# Expected: {"reply":"OK","ok":true}; reply must be nonempty.
+```
+
+`/health` requires no authentication. Every `/command` request requires the exact
+bearer token. Commands accept a nonempty `text` string and at most 64 KiB of JSON.
+Text payloads from `result.payloads` are joined with newlines. Invalid input returns
+400, oversized bodies 413, CLI failures/invalid replies 502, and CLI timeouts 504.
+All failures use `{ "ok": false, "error": "..." }`.
+
+A manual command invokes the configured agent and may incur provider charges.
+
+## Verification in the implementation environment
+
+- TypeScript 5.9.3 compilation passed with the locally available compiler and
+  Node type declarations.
+- `npm test` was attempted but could not start: `vitest: not found`.
+- Dependency installation is blocked: DNS resolution for `registry.npmjs.org`
+  is unavailable in the restricted environment.
+- Manual HTTP/Gateway verification remains pending: binding a loopback socket
+  fails with `EPERM` in the execution sandbox. The curl responses above are
+  expected results, not a claim of a completed live agent turn.
+- A detached standalone invocation of the exact OpenClaw command was attempted
+  without the exec marker. It exited with status 1 and returned no valid reply.
+
+Run `npm install`, `npm test`, `npm run build`, then the curl checks in an
+unrestricted standalone WSL2 shell to complete acceptance verification.
