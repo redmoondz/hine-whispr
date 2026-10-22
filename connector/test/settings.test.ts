@@ -1,7 +1,7 @@
 import { IncomingMessage } from 'node:http';
 import { Socket } from 'node:net';
 import { expect, it, vi } from 'vitest';
-import { createConnectorServer } from '../src/server.ts';
+import { createTestConnectorServer as createConnectorServer } from './testServer.ts';
 import { DEFAULT_SETTINGS } from '../src/settingsStore.ts';
 
 // Exercise the actual listener without requiring sandbox socket permissions.

@@ -46,6 +46,7 @@ Do not commit environment files, credentials, or private CLI output.
 | `CONNECTOR_API_TOKEN` | Required | Nonempty bearer token without whitespace |
 | `CONNECTOR_PORT` | `3210` | Integer port, 1–65535 |
 | `CONNECTOR_TIMEOUT_MS` | `120000` | CLI timeout in milliseconds, 1–2147483647 |
+| `CONNECTOR_DATA_DIR` | `<connector-dir>/data` | Directory for the persistent `analytics.db`; relative overrides resolve from the working directory |
 | `OPENCLAW_BIN` | `openclaw` on `PATH` | Optional executable path |
 | `OPENCLAW_GATEWAY_TOKEN` | Inherited if set | Gateway credential used by OpenClaw |
 | `TMPDIR` | OS default | Optional base directory for private message files |
@@ -147,8 +148,41 @@ Each recent entry contains a unique `id`, completion epoch-ms `ts`, command
 `ok`, and `latencyMs`. Durations use a monotonic clock. Authentication failures,
 invalid input, and other requests that never reach the agent are excluded.
 Failures do not overwrite the last successful latency. In-flight calls appear
-when they finish. Counters and history live only in memory and reset on restart;
-there is no cross-restart persistence or inferred token, CPU, or GPU data.
+when they finish. `/metrics` counters and history live only in memory and reset
+on restart.
+
+`GET /analytics` requires the same bearer token and returns `Cache-Control:
+no-store`. It accumulates completed calls in SQLite and survives restarts:
+
+| Field | Meaning |
+| --- | --- |
+| `ok`, `schemaVersion` | `true`, `1` |
+| `commandsTotal`, `commandsFailed` | Cumulative completed and failed agent calls from SQLite |
+| `uptimeSeconds` | Current process uptime, rounded down to whole seconds; resets on restart |
+| `latency` | `avgMs`, `p50Ms`, `p90Ms`, `maxMs` across all persisted calls, including failures |
+| `requestsByDay` | UTC `day`, `total`, and `failed` for today and the preceding 29 days, sorted ascending; days without calls are omitted |
+
+Latency percentiles use the discrete nearest-rank method. All four latency
+values are `null` with fewer than two calls. Totals and latency include calls
+older than the 30-day daily breakdown. The same completed calls feed both
+`/analytics` and `/metrics` exactly once; requests rejected before agent dispatch
+are excluded from both.
+
+The directory is created on startup. Node's built-in `node:sqlite`
+(`DatabaseSync`) opens `${CONNECTOR_DATA_DIR}/analytics.db` on the first recorded
+call or authenticated analytics read. No database file is created before first
+use. The database stores only a unique ID, completion timestamp, UTC day, source,
+success flag, and latency; it does not store command text or credentials. The
+database closes when the HTTP server closes. No native npm dependency is needed.
+
+Token, GPU, and CPU metrics are intentionally absent from both endpoints.
+The CLI wrapper provides only reply text, so reliable OpenRouter token usage
+is unavailable. The Connector does not observe GPU or CPU usage.
+
+```bash
+curl --fail-with-body "http://127.0.0.1:${CONNECTOR_PORT:-3210}/analytics" \
+  -H "Authorization: Bearer ${CONNECTOR_API_TOKEN}"
+```
 
 JSON responses, including errors, allow browser access only from HTTP origins
 on `127.0.0.1` or `localhost`, with any valid port (or the default HTTP port).
@@ -175,12 +209,16 @@ After an authenticated command completes, metrics should show an incremented
 ## Verification in the implementation environment
 
 - `npm run build` passes with the locally installed TypeScript compiler.
-- Vitest is available. All 110 tests in the telemetry/CORS, chat-completions,
-  settings, and agent-client suites pass with
-  `npm test -- test/telemetry.test.ts test/chatCompletions.test.ts test/settings.test.ts test/agentClient.test.ts`.
-- Full `npm test` cannot pass in this sandbox: the existing server integration
-  tests require loopback listeners and fail with `listen EPERM`. These tests
-  still need to run in an environment that allows socket binding.
+- On Node v24.22.0, all 121 tests in the analytics, telemetry/CORS,
+  chat-completions, settings, and agent-client suites pass with
+  `npm test -- test/analytics.test.ts test/telemetry.test.ts test/chatCompletions.test.ts test/settings.test.ts test/agentClient.test.ts`.
+  Analytics coverage includes a temporary file database reopened after close,
+  persistence across server recreation, and authenticated route checks using the
+  real request listener without binding sockets.
+- Full `npm test` runs 136 tests: 122 pass and 14 fail in this sandbox. The
+  failures are existing server integration tests whose loopback listeners fail
+  with `listen EPERM: operation not permitted 127.0.0.1` (and cleanup reports
+  `Server is not running.`). They still need an environment that permits sockets.
 - Manual HTTP/Gateway verification remains pending: binding a loopback socket
   fails with `EPERM` in the execution sandbox. The curl responses above are
   expected results, not a claim of a completed live agent turn.

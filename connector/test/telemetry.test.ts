@@ -2,7 +2,7 @@ import { IncomingMessage } from 'node:http';
 import { Socket } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentError } from '../src/agentClient.ts';
-import { createConnectorServer } from '../src/server.ts';
+import { createTestConnectorServer as createConnectorServer } from './testServer.ts';
 import { Telemetry } from '../src/telemetry.ts';
 
 afterEach(() => vi.restoreAllMocks());

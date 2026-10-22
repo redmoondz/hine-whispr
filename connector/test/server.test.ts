@@ -1,7 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createConnectorServer } from '../src/server.ts';
+import { createTestConnectorServer as createConnectorServer } from './testServer.ts';
 import { loadConfig } from '../src/config.ts';
 
 const servers: ReturnType<typeof createConnectorServer>[] = [];
@@ -71,5 +72,5 @@ it('loads and validates runtime configuration', () => {
   for (const [key, value] of [['CONNECTOR_PORT', '0'], ['CONNECTOR_PORT', '65536'], ['CONNECTOR_TIMEOUT_MS', '-1'], ['CONNECTOR_TIMEOUT_MS', 'NaN']]) {
     expect(() => loadConfig({ CONNECTOR_API_TOKEN: 'test', [key!]: value })).toThrow();
   }
-  expect(loadConfig({ CONNECTOR_API_TOKEN: 'test' })).toEqual({ apiToken: 'test', port: 3210, timeoutMs: 120000, executable: 'openclaw' });
+  expect(loadConfig({ CONNECTOR_API_TOKEN: 'test' })).toEqual({ apiToken: 'test', port: 3210, timeoutMs: 120000, executable: 'openclaw', dataDir: fileURLToPath(new URL('../data', import.meta.url)) });
 });

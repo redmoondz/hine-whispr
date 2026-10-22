@@ -2,7 +2,7 @@ import { IncomingMessage } from 'node:http';
 import { Socket } from 'node:net';
 import { expect, it, vi } from 'vitest';
 import { AgentError } from '../src/agentClient.ts';
-import { createConnectorServer } from '../src/server.ts';
+import { createTestConnectorServer as createConnectorServer } from './testServer.ts';
 
 const routes = ['/v1/chat/completions', '/chat/completions'];
 const headers = { authorization: 'Bearer test-token', 'content-type': 'application/json' };

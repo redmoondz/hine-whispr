@@ -1,5 +1,7 @@
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { createServer } from 'node:http';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ServerResponse, IncomingMessage } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { AgentError, runAgent } from './agentClient.ts';
@@ -7,6 +9,7 @@ import { loadConfig } from './config.ts';
 import type { Config } from './config.ts';
 import { isObject, SettingsStore } from './settingsStore.ts';
 import { Telemetry } from './telemetry.ts';
+import { AnalyticsStore } from './analyticsStore.ts';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -44,9 +47,20 @@ function lastUserText(messages: unknown): string | undefined {
   return undefined;
 }
 
-export function createConnectorServer(config: Config, agent: (text: string) => Promise<string> = text => runAgent(text, config)) {
+export function createConnectorServer(
+  config: Config,
+  agent: (text: string) => Promise<string> = text => runAgent(text, config),
+  analytics?: AnalyticsStore,
+) {
+  mkdirSync(config.dataDir, { recursive: true });
+  const analyticsStore = analytics ?? new AnalyticsStore(join(config.dataDir, 'analytics.db'));
+  const startedAtMs = Date.now() - Math.floor(process.uptime() * 1000);
   const settings = new SettingsStore();
   const telemetry = new Telemetry();
+  function recordCall(text: string, source: 'command' | 'chat', ok: boolean, latencyMs: number): void {
+    telemetry.record(text, source, ok, latencyMs);
+    analyticsStore.record({ ts: Date.now(), source, ok, latencyMs });
+  }
   const server = createServer(async (request, response) => {
     cors(request, response);
     if (request.method === 'OPTIONS') {
@@ -62,7 +76,8 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
     const settingsRoute = request.url === '/settings';
     const appliedRoute = request.url === '/settings/applied';
     const metricsRoute = request.url === '/metrics';
-    if (request.url !== '/command' && !chatCompletion && !settingsRoute && !appliedRoute && !metricsRoute) {
+    const analyticsRoute = request.url === '/analytics';
+    if (request.url !== '/command' && !chatCompletion && !settingsRoute && !appliedRoute && !metricsRoute && !analyticsRoute) {
       json(response, 404, { ok: false, error: 'Not found' });
       return;
     }
@@ -70,7 +85,7 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
       json(response, 401, { ok: false, error: 'Unauthorized' });
       return;
     }
-    const allowedMethods = metricsRoute ? ['GET'] : settingsRoute ? ['GET', 'PUT'] : ['POST'];
+    const allowedMethods = metricsRoute || analyticsRoute ? ['GET'] : settingsRoute ? ['GET', 'PUT'] : ['POST'];
     if (!allowedMethods.includes(request.method ?? '')) {
       response.setHeader('allow', allowedMethods.join(', '));
       json(response, 405, { ok: false, error: 'Method not allowed' });
@@ -78,6 +93,21 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
     }
     if (metricsRoute) {
       json(response, 200, telemetry.get());
+      return;
+    }
+    if (analyticsRoute) {
+      const now = Date.now();
+      const today = new Date(now).toISOString().slice(0, 10);
+      const sinceDay = new Date(now - 29 * 86400000).toISOString().slice(0, 10);
+      json(response, 200, {
+        ok: true,
+        schemaVersion: 1,
+        commandsTotal: analyticsStore.total(),
+        commandsFailed: analyticsStore.failed(),
+        uptimeSeconds: Math.floor((now - startedAtMs) / 1000),
+        latency: analyticsStore.latencyStats(),
+        requestsByDay: analyticsStore.requestsByDay(sinceDay, today),
+      });
       return;
     }
     if (settingsRoute && request.method === 'GET') {
@@ -137,12 +167,12 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
     try {
       reply = await agent(text);
     } catch (error) {
-      telemetry.record(text, source, false, performance.now() - started);
+      recordCall(text, source, false, performance.now() - started);
       const status = error instanceof AgentError && error.code === 'TIMEOUT' ? 504 : 502;
       json(response, status, { ok: false, error: error instanceof AgentError ? error.message : 'Agent request failed' });
       return;
     }
-    telemetry.record(text, source, true, performance.now() - started);
+    recordCall(text, source, true, performance.now() - started);
     if (stream) {
       response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
       // The CLI returns a final answer, so send one content event without delay.
@@ -155,6 +185,7 @@ export function createConnectorServer(config: Config, agent: (text: string) => P
   });
   server.requestTimeout = 30000;
   server.headersTimeout = 10000;
+  server.on('close', () => analyticsStore.close());
   return server;
 }
 
