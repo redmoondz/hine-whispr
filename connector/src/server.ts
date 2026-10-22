@@ -51,7 +51,7 @@ function lastUserText(messages: unknown): string | undefined {
 
 export function createConnectorServer(
   config: Config,
-  agent: (text: string) => Promise<string> = text => runAgent(text, config),
+  agent: (text: string, timeoutMs?: number) => Promise<string> = (text, timeoutMs) => runAgent(text, { ...config, timeoutMs: timeoutMs ?? config.timeoutMs }),
   analytics?: AnalyticsStore,
 ) {
   mkdirSync(config.dataDir, { recursive: true });
@@ -152,6 +152,7 @@ export function createConnectorServer(
     }
     let text: string;
     let stream = false;
+    let timeoutMs: number | undefined;
     try {
       const chunks: Buffer[] = [];
       let size = 0;
@@ -197,6 +198,11 @@ export function createConnectorServer(
         return;
       }
       if (!body || typeof body !== 'object') throw new Error();
+      if ('timeoutSeconds' in body) {
+        const value = body.timeoutSeconds;
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 3600) throw new Error();
+        timeoutMs = value * 1000;
+      }
       const input = chatCompletion
         ? lastUserText('messages' in body ? body.messages : undefined)
         : 'text' in body ? body.text : undefined;
@@ -219,7 +225,7 @@ export function createConnectorServer(
     const source = chatCompletion ? 'chat' : 'command';
     let reply: string;
     try {
-      reply = await agent(text);
+      reply = timeoutMs === undefined ? await agent(text) : await agent(text, timeoutMs);
     } catch (error) {
       recordCall(text, source, false, performance.now() - started);
       const status = error instanceof AgentError && error.code === 'TIMEOUT' ? 504 : 502;

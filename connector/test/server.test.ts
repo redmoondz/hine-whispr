@@ -44,6 +44,20 @@ it('returns a reply for an authenticated command', async () => {
   expect(agent).toHaveBeenCalledWith('hello');
 });
 
+it('forwards a validated desktop timeout to the agent', async () => {
+  const { url, agent } = await setup();
+  const response = await fetch(`${url}/command`, { method: 'POST', headers: { authorization: 'Bearer test-token' }, body: JSON.stringify({ text: 'Long command', timeoutSeconds: 900 }) });
+  expect(response.status).toBe(200);
+  expect(agent).toHaveBeenCalledWith('Long command', 900000);
+});
+
+it.each([0, -1, 1.5, 3601, '300', null])('rejects an invalid per-request timeout: %s', async timeoutSeconds => {
+  const { url, agent } = await setup();
+  const response = await fetch(`${url}/command`, { method: 'POST', headers: { authorization: 'Bearer test-token' }, body: JSON.stringify({ text: 'Long command', timeoutSeconds }) });
+  expect(response.status).toBe(400);
+  expect(agent).not.toHaveBeenCalled();
+});
+
 it.each(['bad', 'null', '[]', '{}', '{"text":1}', '{"text":" "}'])('rejects invalid input: %s', async body => {
   const { url, agent } = await setup();
   const response = await fetch(`${url}/command`, { method: 'POST', headers: { authorization: 'Bearer test-token' }, body });
@@ -72,5 +86,5 @@ it('loads and validates runtime configuration', () => {
   for (const [key, value] of [['CONNECTOR_PORT', '0'], ['CONNECTOR_PORT', '65536'], ['CONNECTOR_TIMEOUT_MS', '-1'], ['CONNECTOR_TIMEOUT_MS', 'NaN']]) {
     expect(() => loadConfig({ CONNECTOR_API_TOKEN: 'test', [key!]: value })).toThrow();
   }
-  expect(loadConfig({ CONNECTOR_API_TOKEN: 'test' })).toEqual({ apiToken: 'test', port: 3210, timeoutMs: 120000, executable: 'openclaw', dataDir: fileURLToPath(new URL('../data', import.meta.url)) });
+  expect(loadConfig({ CONNECTOR_API_TOKEN: 'test' })).toEqual({ apiToken: 'test', port: 3210, timeoutMs: 300000, executable: 'openclaw', dataDir: fileURLToPath(new URL('../data', import.meta.url)) });
 });

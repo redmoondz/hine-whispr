@@ -4,6 +4,14 @@ A standalone Node.js process connecting a loopback HTTP API to the existing
 OpenClaw agent `hina`. Runtime uses Node built-ins only. TypeScript and Vitest
 are development dependencies. Use Node 22.18+ or Node 24+.
 
+Agent calls default to 300 seconds (5 minutes), configurable through
+`CONNECTOR_TIMEOUT_MS`. Desktop may override the next request with an integer
+`timeoutSeconds` from 1 to 3600 in `/command` or `/v1/chat/completions` JSON.
+Connector passes that deadline to OpenClaw's `--timeout` and gives the CLI
+process five seconds to return its final result. A client disconnect does not
+cancel the agent turn. A configured timeout still bounds it; check the agent
+session before retrying a request whose client connection was lost.
+
 ## Install and run
 
 ```bash
@@ -45,7 +53,7 @@ Do not commit environment files, credentials, or private CLI output.
 | --- | --- | --- |
 | `CONNECTOR_API_TOKEN` | Required | Nonempty bearer token without whitespace |
 | `CONNECTOR_PORT` | `3210` | Integer port, 1–65535 |
-| `CONNECTOR_TIMEOUT_MS` | `120000` | CLI timeout in milliseconds, 1–2147483647 |
+| `CONNECTOR_TIMEOUT_MS` | `300000` | Agent timeout in milliseconds, 1–2147483647; Desktop can override per request |
 | `CONNECTOR_DATA_DIR` | `<connector-dir>/data` | Directory for the persistent `analytics.db`; relative overrides resolve from the working directory |
 | `OPENCLAW_BIN` | `openclaw` on `PATH` | Optional executable path |
 | `OPENCLAW_GATEWAY_TOKEN` | Inherited if set | Gateway credential used by OpenClaw |

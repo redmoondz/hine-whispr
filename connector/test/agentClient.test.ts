@@ -27,11 +27,11 @@ it('passes a private message file to the existing agent and cleans up', async ()
   execFile.mockImplementation((_bin, args, options, callback) => {
     messagePath = args[4];
     void (async () => {
-      expect(args).toEqual(['agent', '--agent', 'hina', '--message-file', messagePath, '--json']);
+      expect(args).toEqual(['agent', '--agent', 'hina', '--message-file', messagePath, '--json', '--timeout', '2']);
       expect(await readFile(messagePath, 'utf8')).toBe('literal $(text)\nmessage');
       expect((await stat(messagePath)).mode & 0o777).toBe(0o600);
       expect(options.shell).toBe(false);
-      expect(options.timeout).toBe(1234);
+      expect(options.timeout).toBe(6234);
       callback(null, '{"ok":true,"result":{"payloads":[{"text":"OK"}]}}', '');
     })().catch(callback);
   });

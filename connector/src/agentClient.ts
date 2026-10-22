@@ -42,10 +42,10 @@ export async function runAgent(text: string, config: Pick<Config, 'timeoutMs' | 
     const messagePath = join(directory, 'message.txt');
     await writeFile(messagePath, text, { encoding: 'utf8', mode: 0o600 });
     const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(config.executable, ['agent', '--agent', 'hina', '--message-file', messagePath, '--json'], {
+      execFile(config.executable, ['agent', '--agent', 'hina', '--message-file', messagePath, '--json', '--timeout', String(Math.ceil(config.timeoutMs / 1000))], {
         encoding: 'utf8',
         shell: false,
-        timeout: config.timeoutMs,
+        timeout: Math.min(config.timeoutMs + 5000, 2147483647),
         killSignal: 'SIGKILL',
         maxBuffer: 4 * 1024 * 1024,
         windowsHide: true,

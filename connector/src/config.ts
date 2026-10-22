@@ -25,7 +25,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     apiToken,
     port: integer(env.CONNECTOR_PORT, 3210, 'CONNECTOR_PORT', 65535),
-    timeoutMs: integer(env.CONNECTOR_TIMEOUT_MS, 120000, 'CONNECTOR_TIMEOUT_MS', 2147483647),
+    timeoutMs: integer(env.CONNECTOR_TIMEOUT_MS, 300000, 'CONNECTOR_TIMEOUT_MS', 2147483647),
     executable: env.OPENCLAW_BIN || 'openclaw',
     dataDir: env.CONNECTOR_DATA_DIR || fileURLToPath(new URL('../data', import.meta.url)),
   };
