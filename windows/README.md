@@ -94,6 +94,17 @@ curl -sL -o /mnt/c/Users/siriu/tools/node-v24.22.1-win-x64.zip \
 | `npm run typecheck` | ✅ exit 0 |
 | `npm test` (after Node-ABI rebuild) | ⚠️ ~8245+ assertions pass, ~107 fail — **environment-specific, not toolchain** |
 | `npm run build:renderer` (Vite) | ✅ exit 0, `dist/` produced |
+| `electron-builder --win` (full) | ✅ produces `dist/win-unpacked/OpenWhispr.exe` (223 MB) + 791 MB unpacked app; fails only at **release code-signing** |
+| `electron-builder --win --dir` (unsigned local) | ✅ exit 0 after stripping `win.azureSignOptions` + `forceCodeSigning=false` |
+
+### Code signing
+
+`electron-builder.json` sets `win.forceCodeSigning: true` + `win.azureSignOptions`
+(Azure TrustedSigning, profile `openwhispr-release`). That step requires release
+credentials this machine does not have, so a local build must disable it.
+`hina-package.ps1` does this automatically: it strips signing, runs
+`electron-builder --win --dir` (unsigned), then restores the config. A signed
+NSIS installer is release-only.
 
 ### Remaining test failures (categorised, not pipeline defects)
 
