@@ -127,12 +127,57 @@ curl --fail-with-body --no-buffer \
   -d '{"messages":[{"role":"user","content":"Reply with exactly OK"}],"stream":false}'
 ```
 
+## Metrics, command history, and Dashboard CORS
+
+`GET /metrics` requires the same bearer token as `/command` and returns JSON
+with `Cache-Control: no-store`:
+
+| Field | Meaning |
+| --- | --- |
+| `ok` | `true` |
+| `startedAtMs` | Process start time in epoch milliseconds |
+| `commandsTotal` | Completed agent calls, including failures, from `/command` and both chat routes |
+| `commandsFailed` | Agent calls that ended in an error response |
+| `lastLatencyMs` | Duration of the last successful agent call, or `null` before any success |
+| `lastLatencyAtMs` | Completion time of that success in epoch milliseconds, or `null` |
+| `recent` | Last 20 completed calls, oldest first |
+
+Each recent entry contains a unique `id`, completion epoch-ms `ts`, command
+`text` truncated to 200 UTF-16 code units, `source` (`command` or `chat`), boolean
+`ok`, and `latencyMs`. Durations use a monotonic clock. Authentication failures,
+invalid input, and other requests that never reach the agent are excluded.
+Failures do not overwrite the last successful latency. In-flight calls appear
+when they finish. Counters and history live only in memory and reset on restart;
+there is no cross-restart persistence or inferred token, CPU, or GPU data.
+
+JSON responses, including errors, allow browser access only from HTTP origins
+on `127.0.0.1` or `localhost`, with any valid port (or the default HTTP port).
+The server echoes the allowed origin and sends `Vary: Origin`. OPTIONS preflight
+returns an empty 204 without requiring authentication, allowing `GET`, `POST`,
+`PUT`, and `OPTIONS` with `Authorization` and `Content-Type` headers. Actual
+requests still require their existing authentication. Other origins receive no
+allow-origin header. The same origin policy also applies to chat SSE responses.
+
+```bash
+curl --fail-with-body "http://127.0.0.1:${CONNECTOR_PORT:-3210}/metrics" \
+  -H "Authorization: Bearer ${CONNECTOR_API_TOKEN}"
+
+curl -i -X OPTIONS "http://127.0.0.1:${CONNECTOR_PORT:-3210}/command" \
+  -H 'Origin: http://localhost:5173' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: authorization,content-type'
+```
+
+After an authenticated command completes, metrics should show an incremented
+`commandsTotal` and a recent entry. The preflight should return 204 and
+`Access-Control-Allow-Origin: http://localhost:5173`.
+
 ## Verification in the implementation environment
 
 - `npm run build` passes with the locally installed TypeScript compiler.
-- Vitest is available. The 29 in-memory chat-completions contract tests and
-  12 agent-client tests pass with
-  `npm test -- test/chatCompletions.test.ts test/agentClient.test.ts`.
+- Vitest is available. All 110 tests in the telemetry/CORS, chat-completions,
+  settings, and agent-client suites pass with
+  `npm test -- test/telemetry.test.ts test/chatCompletions.test.ts test/settings.test.ts test/agentClient.test.ts`.
 - Full `npm test` cannot pass in this sandbox: the existing server integration
   tests require loopback listeners and fail with `listen EPERM`. These tests
   still need to run in an environment that allows socket binding.
