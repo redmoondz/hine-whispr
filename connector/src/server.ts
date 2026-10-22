@@ -10,6 +10,8 @@ import type { Config } from './config.ts';
 import { isObject, SettingsStore } from './settingsStore.ts';
 import { Telemetry } from './telemetry.ts';
 import { AnalyticsStore } from './analyticsStore.ts';
+import { HandsStore, OPERATION_STATUSES } from './handsStore.ts';
+import type { OperationStatus } from './handsStore.ts';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -57,6 +59,7 @@ export function createConnectorServer(
   const startedAtMs = Date.now() - Math.floor(process.uptime() * 1000);
   const settings = new SettingsStore();
   const telemetry = new Telemetry();
+  const hands = new HandsStore();
   function recordCall(text: string, source: 'command' | 'chat', ok: boolean, latencyMs: number): void {
     telemetry.record(text, source, ok, latencyMs);
     analyticsStore.record({ ts: Date.now(), source, ok, latencyMs });
@@ -77,7 +80,12 @@ export function createConnectorServer(
     const appliedRoute = request.url === '/settings/applied';
     const metricsRoute = request.url === '/metrics';
     const analyticsRoute = request.url === '/analytics';
-    if (request.url !== '/command' && !chatCompletion && !settingsRoute && !appliedRoute && !metricsRoute && !analyticsRoute) {
+    const [pathname, query = ''] = (request.url ?? '').split('?');
+    const operationsRoute = pathname === '/hands/operations';
+    const allowlistRoute = pathname === '/hands/allowlist';
+    const operationRoute = /^\/hands\/operations\/([^/]+)(?:\/(approve|deny))?$/.exec(pathname ?? '');
+    const handsRoute = operationsRoute || allowlistRoute || operationRoute !== null;
+    if (request.url !== '/command' && !chatCompletion && !settingsRoute && !appliedRoute && !metricsRoute && !analyticsRoute && !handsRoute) {
       json(response, 404, { ok: false, error: 'Not found' });
       return;
     }
@@ -85,10 +93,38 @@ export function createConnectorServer(
       json(response, 401, { ok: false, error: 'Unauthorized' });
       return;
     }
-    const allowedMethods = metricsRoute || analyticsRoute ? ['GET'] : settingsRoute ? ['GET', 'PUT'] : ['POST'];
+    const allowedMethods = operationsRoute ? ['GET', 'POST']
+      : allowlistRoute || settingsRoute ? ['GET', 'PUT']
+      : metricsRoute || analyticsRoute || (operationRoute && !operationRoute[2]) ? ['GET'] : ['POST'];
     if (!allowedMethods.includes(request.method ?? '')) {
       response.setHeader('allow', allowedMethods.join(', '));
       json(response, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    if (operationsRoute && request.method === 'GET') {
+      const status = new URLSearchParams(query).get('status');
+      if (status !== null && !OPERATION_STATUSES.includes(status as OperationStatus)) {
+        json(response, 400, { ok: false, error: 'INVALID' });
+        return;
+      }
+      json(response, 200, { ok: true, operations: hands.list((status ?? undefined) as OperationStatus | undefined) });
+      return;
+    }
+    if (allowlistRoute && request.method === 'GET') {
+      json(response, 200, { ok: true, targets: hands.getAllowlist() });
+      return;
+    }
+    if (operationRoute) {
+      const id = operationRoute[1]!;
+      try {
+        const operation = operationRoute[2] === 'approve' ? hands.approve(id)
+          : operationRoute[2] === 'deny' ? hands.deny(id) : hands.get(id);
+        json(response, operation ? 200 : 404, operation
+          ? { ok: true, operation } : { ok: false, error: 'Not found' });
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'NOT_PENDING') throw error;
+        json(response, 409, { ok: false, error: 'NOT_PENDING' });
+      }
       return;
     }
     if (metricsRoute) {
@@ -129,6 +165,24 @@ export function createConnectorServer(
         chunks.push(chunk);
       }
       const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (allowlistRoute) {
+        if (!isObject(body) || !Array.isArray(body.targets) ||
+            !body.targets.every((target: unknown) => typeof target === 'string')) throw new Error();
+        json(response, 200, { targets: hands.setAllowlist(body.targets) });
+        return;
+      }
+      if (operationsRoute) {
+        if (!isObject(body) || (body.type !== 'browser' && body.type !== 'app' && body.type !== 'shell') ||
+            typeof body.target !== 'string' || !body.target.trim() ||
+            typeof body.action !== 'string' || !body.action.trim() ||
+            (Object.hasOwn(body, 'params') && !isObject(body.params))) throw new Error();
+        const operation = hands.createOperation({
+          type: body.type, target: body.target, action: body.action,
+          ...(isObject(body.params) ? { params: body.params } : {}),
+        }, settings.get().settings.hands);
+        json(response, 200, { ok: true, operation });
+        return;
+      }
       if (settingsRoute) {
         if (!isObject(body) || typeof body.baseRevision !== 'number' || !isObject(body.settings)) {
           throw new Error();
@@ -152,7 +206,7 @@ export function createConnectorServer(
       text = input;
       stream = chatCompletion && 'stream' in body && body.stream === true;
     } catch {
-      if (settingsRoute || appliedRoute) {
+      if (settingsRoute || appliedRoute || handsRoute) {
         json(response, 400, { ok: false, error: 'INVALID' });
         return;
       }

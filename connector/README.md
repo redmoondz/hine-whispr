@@ -206,16 +206,50 @@ After an authenticated command completes, metrics should show an incremented
 `commandsTotal` and a recent entry. The preflight should return 204 and
 `Access-Control-Allow-Origin: http://localhost:5173`.
 
+## Hands coordination
+
+Hands coordinates approvals; it does not execute browser, app, or shell actions.
+Every route below requires the Connector bearer token and returns JSON with
+`Cache-Control: no-store`. The journal and allowlist are process-local, like
+`/metrics`, and reset on restart. Only the newest 50 operations are retained.
+
+| Route | Behavior |
+| --- | --- |
+| `POST /hands/operations` | Accepts `{ type, target, action, params? }`; returns `{ ok: true, operation }` |
+| `GET /hands/operations?status=pending` | Lists newest first; optional status is `pending`, `approved`, `denied`, `auto-approved`, or `auto-denied` |
+| `GET /hands/operations/:id` | Returns `{ ok: true, operation }`, or 404 |
+| `POST /hands/operations/:id/approve` | Resolves a pending operation to `approved` |
+| `POST /hands/operations/:id/deny` | Resolves a pending operation to `denied` |
+| `GET /hands/allowlist` | Returns `{ ok: true, targets: [...] }` |
+| `PUT /hands/allowlist` | Replaces with `{ targets: string[] }`, trimming, dropping empty strings, and deduplicating; returns `{ targets }` |
+
+Operation types are `browser`, `app`, and `shell`; target and action must be
+nonempty strings, and optional params must be a JSON object. Invalid bodies
+or status filters return 400; creation and allowlist bodies are capped at 64 KiB.
+Operations include a unique ID, creation epoch milliseconds, and status.
+Explicit approval or denial adds `resolvedAtMs` and `approver: "connector"`;
+resolving an already resolved operation returns 409 with `error: "NOT_PENDING"`.
+
+Creation uses the current saved `settings.hands` (both flags default to `true`):
+browser operations are `auto-denied` with `reason: "browser_control_disabled"`
+when `browserControl` is false. Otherwise `confirmMode: true` always leaves
+the operation pending. Only `confirmMode: false` plus an exact allowlist target
+match produces `auto-approved`; all other operations remain pending. Automatic
+decisions include `resolvedAtMs`. Changing settings or the allowlist affects
+future operations only.
+
 ## Verification in the implementation environment
 
 - `npm run build` passes with the locally installed TypeScript compiler.
-- On Node v24.22.0, all 121 tests in the analytics, telemetry/CORS,
-  chat-completions, settings, and agent-client suites pass with
-  `npm test -- test/analytics.test.ts test/telemetry.test.ts test/chatCompletions.test.ts test/settings.test.ts test/agentClient.test.ts`.
+- On Node v24.22.0, all 74 Hands store and route tests pass with
+  `npm test -- test/hands.test.ts`. They exercise the actual HTTP request
+  listener without binding sockets.
+- All 121 tests in the analytics, telemetry/CORS, chat-completions, settings,
+  and agent-client suites also pass during the full run.
   Analytics coverage includes a temporary file database reopened after close,
   persistence across server recreation, and authenticated route checks using the
   real request listener without binding sockets.
-- Full `npm test` runs 136 tests: 122 pass and 14 fail in this sandbox. The
+- Full `npm test` runs 210 tests: 196 pass and 14 fail in this sandbox. The
   failures are existing server integration tests whose loopback listeners fail
   with `listen EPERM: operation not permitted 127.0.0.1` (and cleanup reports
   `Server is not running.`). They still need an environment that permits sockets.

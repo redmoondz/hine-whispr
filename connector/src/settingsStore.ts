@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
     vadEnabled: false, ttsEnabled: false, playbackRate: 1,
   }),
   agent: Object.freeze({ model: '', confirmActions: true }),
-  hands: Object.freeze({ browserControl: false, confirmMode: true }),
+  hands: Object.freeze({ browserControl: true, confirmMode: true }),
 });
 
 export function isObject(value: unknown): value is Record<string, unknown> {
