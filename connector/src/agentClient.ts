@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,7 +43,7 @@ export async function runAgent(text: string, config: Pick<Config, 'timeoutMs' | 
     const messagePath = join(directory, 'message.txt');
     await writeFile(messagePath, text, { encoding: 'utf8', mode: 0o600 });
     const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(config.executable, ['agent', '--agent', 'hina', '--message-file', messagePath, '--json', '--timeout', String(Math.ceil(config.timeoutMs / 1000))], {
+      execFile(config.executable, ['agent', '--agent', 'hina', '--message-file', messagePath, '--json', '--timeout', String(Math.ceil(config.timeoutMs / 1000)), '--session-key', `agent:hina:desktop:${randomUUID()}`], {
         encoding: 'utf8',
         shell: false,
         timeout: Math.min(config.timeoutMs + 5000, 2147483647),

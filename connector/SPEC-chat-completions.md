@@ -35,7 +35,8 @@ the self-hosted target.
    one-line prefix is NOT required — MVP passes only the last user message to
    the agent, but keep it simple and documented).
 2. Map the call to the existing `runAgent(text, config)` (i.e. `openclaw agent
-   --agent hina --message-file --json`). Do NOT call OpenRouter directly.
+   --agent hina --message-file --json --session-key agent:hina:desktop:<uuid>`
+   with a fresh UUID per call). Do NOT call OpenRouter directly.
 3. Non-streaming: return `choices[0].message.content = reply`, `finish_reason:
    "stop"`, plus a small `usage` mirror if trivially available (else omit —
    do not invent token counts).

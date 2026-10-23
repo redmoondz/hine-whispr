@@ -38,10 +38,16 @@ nohup env -u OPENCLAW_SHELL node dist/server.js > connector.log 2>&1 &
 The standalone process invokes exactly:
 
 ```text
-openclaw agent --agent hina --message-file <private temporary file> --json
+openclaw agent --agent hina --message-file <private temporary file> --json --timeout <seconds> --session-key agent:hina:desktop:<uuid>
 ```
 
 It creates no agent and uses neither OpenRouter directly nor `/tools/invoke`.
+Every invocation generates a fresh UUID session key, including repeated,
+concurrent, and retried requests. Desktop hotkey commands therefore use separate
+conversations without Telegram or previous command history. This applies to
+`/command` and both chat-completions routes. Hina's agent configuration and
+shared workspace memory still apply; session isolation is not a separate agent.
+OpenClaw retains these sessions according to its session retention settings.
 Input is written as UTF-8 to a mode-0600 file in a private temporary directory,
 then deleted after completion or failure. Environment, including Gateway
 credentials, is inherited at runtime. There is no shell interpolation of input.

@@ -12,7 +12,9 @@ linchpin end-to-end.
 
 1. **Do NOT create a second agent.** Call the existing agent `hina` through the
    official OpenClaw CLI (fallback path for MVP):
-   `openclaw agent --agent hina --message-file <file> --json`
+   `openclaw agent --agent hina --message-file <file> --json --session-key agent:hina:desktop:<uuid>`
+   Generate a fresh UUID for each invocation so desktop commands never reuse
+   Telegram's main session or a previous desktop conversation.
    Read the reply from stdout JSON. Do NOT call OpenRouter directly. Do NOT use
    `POST /tools/invoke` (too broad).
 2. **No secrets in code/git.** The Gateway token (env `OPENCLAW_GATEWAY_TOKEN`)
