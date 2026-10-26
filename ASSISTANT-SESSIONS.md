@@ -49,7 +49,11 @@ light and dark themes. The live Gateway accepted a read-only history request;
 no inference was launched. See `desktop/docs/HINA-ASSISTANT-SESSIONS.md` and
 `desktop/evidence/assistant-sessions/` in the separate Desktop repository.
 
-Deployment and interactive Windows hotkey/microphone E2E are not performed.
-Both Desktop and Connector must be updated together. Existing running services
-and the installed Windows application were left untouched to preserve active
-work. Existing agent deadlines still apply.
+Initial implementation verification did not deploy either component. The
+subsequently authorized v0.5.0 release updated Connector only after verifying
+that its complete service cgroup contained no other processes. Its authenticated
+session API returned HTTP 200. The stable Windows release is published at
+https://github.com/redmoondz/hina-desktop/releases/tag/v0.5.0 and available in
+the public updater feed. Source tag: `51db2615bb9f810320efc7f06e8f73c486111af1`.
+The user updates the installed Desktop through the tray. Interactive Windows
+hotkey/microphone E2E remains user-side. Existing agent deadlines still apply.
