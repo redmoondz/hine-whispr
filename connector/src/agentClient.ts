@@ -36,14 +36,14 @@ export function parseReply(stdout: string): string {
   }
 }
 
-export async function runAgent(text: string, config: Pick<Config, 'timeoutMs' | 'executable'>): Promise<string> {
+export async function runAgent(text: string, config: Pick<Config, 'timeoutMs' | 'executable'>, sessionId?: string): Promise<string> {
   let directory: string | undefined;
   try {
     directory = await mkdtemp(join(tmpdir(), 'hina-connector-'));
     const messagePath = join(directory, 'message.txt');
     await writeFile(messagePath, text, { encoding: 'utf8', mode: 0o600 });
     const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(config.executable, ['agent', '--agent', 'hina', '--message-file', messagePath, '--json', '--timeout', String(Math.ceil(config.timeoutMs / 1000)), '--session-key', `agent:hina:desktop:${randomUUID()}`], {
+      execFile(config.executable, ['agent', '--agent', 'hina', '--message-file', messagePath, '--json', '--timeout', String(Math.ceil(config.timeoutMs / 1000)), '--session-key', `agent:hina:desktop:${sessionId ?? randomUUID()}`], {
         encoding: 'utf8',
         shell: false,
         timeout: Math.min(config.timeoutMs + 5000, 2147483647),

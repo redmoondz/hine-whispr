@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import type { ServerResponse, IncomingMessage } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { AgentError, runAgent } from './agentClient.ts';
+import { SessionStore } from './sessionStore.ts';
+import { sessionRoute } from './sessionRoutes.ts';
+import { readSessionActivity } from './sessionProgress.ts';
 import { loadConfig } from './config.ts';
 import type { Config } from './config.ts';
 import { isObject, SettingsStore } from './settingsStore.ts';
@@ -64,6 +67,30 @@ export function createConnectorServer(
     telemetry.record(text, source, ok, latencyMs);
     analyticsStore.record({ ts: Date.now(), source, ok, latencyMs });
   }
+  let serverClosing = false;
+  const sessions = new SessionStore(join(config.dataDir, 'sessions.json'), async (text, id, timeoutMs) => {
+    // Bound progress polling to one outstanding read per running session.
+    const started = performance.now();
+    let reading = false;
+    let finished = false;
+    const timer = setInterval(() => {
+      if (reading) return;
+      reading = true;
+      void readSessionActivity(config.executable, id)
+        .then(activity => { if (!finished) sessions.updateActivity(id, activity); })
+        .finally(() => { reading = false; });
+    }, 5000);
+    timer.unref();
+    try {
+      const reply = await runAgent(text, { ...config, timeoutMs }, id);
+      if (!serverClosing) recordCall(text, 'chat', true, performance.now() - started);
+      return reply;
+    } catch (error) {
+      if (!serverClosing) recordCall(text, 'chat', false, performance.now() - started);
+      throw error;
+    }
+    finally { finished = true; clearInterval(timer); }
+  });
   const server = createServer(async (request, response) => {
     cors(request, response);
     if (request.method === 'OPTIONS') {
@@ -73,6 +100,14 @@ export function createConnectorServer(
     }
     if (request.url === '/health' && request.method === 'GET') {
       json(response, 200, { ok: true, agent: 'hina' });
+      return;
+    }
+    if (request.url === '/sessions' || request.url?.startsWith('/sessions/')) {
+      if (!authorized(request, config.apiToken)) {
+        json(response, 401, { ok: false, error: 'Unauthorized' });
+        return;
+      }
+      await sessionRoute(request, response, sessions);
       return;
     }
     const chatCompletion = request.url === '/v1/chat/completions' || request.url === '/chat/completions';
@@ -245,7 +280,7 @@ export function createConnectorServer(
   });
   server.requestTimeout = 30000;
   server.headersTimeout = 10000;
-  server.on('close', () => analyticsStore.close());
+  server.on('close', () => { serverClosing = true; analyticsStore.close(); });
   return server;
 }
 

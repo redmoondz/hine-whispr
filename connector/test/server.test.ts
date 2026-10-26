@@ -88,3 +88,18 @@ it('loads and validates runtime configuration', () => {
   }
   expect(loadConfig({ CONNECTOR_API_TOKEN: 'test' })).toEqual({ apiToken: 'test', port: 3210, timeoutMs: 300000, executable: 'openclaw', dataDir: fileURLToPath(new URL('../data', import.meta.url)) });
 });
+
+it.each(['/sessions', '/sessions/one/messages', '/sessions/one/close'])('protects conversation history and actions: %s', async route => {
+  const { url, agent } = await setup();
+  const response = await fetch(`${url}${route}`, { method: route === '/sessions' ? 'GET' : 'POST' });
+  expect(response.status).toBe(401);
+  expect(agent).not.toHaveBeenCalled();
+});
+
+it('lists persistent conversations only with Connector authentication', async () => {
+  const { url, agent } = await setup();
+  const response = await fetch(`${url}/sessions`, { headers: { authorization: 'Bearer test-token' } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true, sessions: [] });
+  expect(agent).not.toHaveBeenCalled();
+});

@@ -69,3 +69,15 @@ it.each([new Error('private stderr'), Object.assign(new Error('private'), { kill
     await expect(access(messagePath)).rejects.toThrow();
   },
 );
+
+it('reuses an explicitly selected desktop conversation for follow-ups', async () => {
+  const keys: string[] = [];
+  execFile.mockImplementation((_bin, args, _options, callback) => {
+    keys.push(args[args.indexOf('--session-key') + 1]);
+    callback(null, '{"ok":true,"result":{"payloads":[{"text":"OK"}]}}', '');
+  });
+  const config = { timeoutMs: 100, executable: 'openclaw' };
+  await runAgent('first', config, 'same-session');
+  await runAgent('follow up', config, 'same-session');
+  expect(keys).toEqual(['agent:hina:desktop:same-session', 'agent:hina:desktop:same-session']);
+});

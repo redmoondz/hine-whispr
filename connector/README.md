@@ -42,8 +42,8 @@ openclaw agent --agent hina --message-file <private temporary file> --json --tim
 ```
 
 It creates no agent and uses neither OpenRouter directly nor `/tools/invoke`.
-Every invocation generates a fresh UUID session key, including repeated,
-concurrent, and retried requests. Desktop hotkey commands therefore use separate
+Legacy stateless requests generate a fresh UUID session key, including repeated,
+concurrent, and retried requests. These requests therefore use separate
 conversations without Telegram or previous command history. This applies to
 `/command` and both chat-completions routes. Hina's agent configuration and
 shared workspace memory still apply; session isolation is not a separate agent.
@@ -275,3 +275,32 @@ future operations only.
 
 Run `npm test`, `npm run build`, then the curl checks in an
 unrestricted standalone WSL2 shell to complete acceptance verification.
+
+## Persistent Desktop conversations
+
+The local Desktop assistant uses authenticated session routes:
+
+- `GET /sessions`: conversation history, including running and completed turns.
+- `GET /sessions/:id`: one conversation and its current progress snapshot.
+- `POST /sessions/:id/messages`: `{ requestId, text, timeoutSeconds }`; accepts with HTTP 202 without waiting for the agent.
+- `POST /sessions/:id/close`: archives the conversation without stopping queued or running work.
+
+Client-generated IDs contain 1–80 ASCII letters, digits or hyphens. Repeating a
+request ID within its conversation is idempotent. Turns in the same conversation
+run in order on `agent:hina:desktop:<id>`. Up to four conversations execute at
+once. Legacy command and chat-completions routes retain their previous behavior.
+
+State is saved atomically to mode-0600 `data/sessions.json` (or the configured
+data directory). Closing or hiding the UI does not own or cancel agent execution.
+After a Connector restart, unfinished turns become `unknown`; they are never
+replayed automatically, because external actions might already have happened.
+The Desktop must check the OpenClaw session before repeating uncertain requests.
+
+While a turn runs, Connector polls the official `gateway call chat.history`
+interface every five seconds, with at most one outstanding read per conversation.
+Only public assistant text and tool names are projected. Thinking, tool arguments
+and raw tool results are excluded. Availability depends on Gateway permissions;
+the UI explicitly reports unavailable detailed progress. This is a persisted
+history snapshot, not token-level streaming or an operating-system download meter.
+Existing agent timeouts still apply. A missing final reply does not prove that
+an external installation stopped. Session history currently has no deletion UI.
